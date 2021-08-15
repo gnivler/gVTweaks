@@ -1,11 +1,9 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 using UnityEngine;
 using static gVTweaks.Mod;
-using Object = UnityEngine.Object;
-using BepInEx;
+using UnityEngine.PostProcessing;
 using static gVTweaks.Settings;
 
 namespace gVTweaks
@@ -37,14 +35,22 @@ namespace gVTweaks
                 }
 
                 //if (Input.GetKeyDown(KeyCode.F4))
-                //{
-                //    var iron = Resources.FindObjectsOfTypeAll<ItemDrop>().First(o => o.name == "Iron");
-                //    iron.Awake();
-                //    for (var i = 0; i < 30; i++)
-                //    {
-                //        Player.m_localPlayer.m_inventory.AddItem(iron.m_itemData.Clone());
-                //    }
-                //}
+                {
+                    //var ArmorWolfLegs = Resources.FindObjectsOfTypeAll<ItemDrop>().First(o => o.name == "ArmorWolfLegs");
+                    //ArmorWolfLegs.Awake();
+                    //for (var i = 0; i < 25; i++)
+                    //{
+                    //    Player.m_localPlayer.m_inventory.AddItem(ArmorWolfLegs.m_itemData.Clone());
+                    //}
+
+                    //var ArmorWolfChest = Resources.FindObjectsOfTypeAll<ItemDrop>().First(o => o.name == "ArmorWolfLegs");
+                    //ArmorWolfChest.Awake();
+                    //Player.m_localPlayer.m_inventory.AddItem(Player.m_localPlayer.m_inventory.AddItem("DragonEgg", 1, 0, 0,  0, "");
+                    //var ship = new GameObject("CustomLongship");
+                    //ship.AddComponent<Ship>();
+                    //ship.transform.position = Player.m_localPlayer.transform.position + Vector3.one;
+                    //Object.Instantiate(ship);
+                }
             }
         }
 
@@ -74,10 +80,10 @@ namespace gVTweaks
         {
             public static void Postfix(ref int ___m_activeArea, ref int ___m_activeDistantArea)
             {
-                if (viewDistance.Value)
+                if (viewDistanceIncrease.Value > 0)
                 {
-                    ___m_activeArea = 4;
-                    ___m_activeDistantArea = 4;
+                    ___m_activeArea = 2 + viewDistanceIncrease.Value;
+                    ___m_activeDistantArea = 2 + viewDistanceIncrease.Value;
                 }
             }
         }
@@ -87,32 +93,24 @@ namespace gVTweaks
         {
             public static void Prefix(ref int area, ref int distantArea)
             {
-                if (viewDistance.Value)
+                if (viewDistanceIncrease.Value > 0)
                 {
-                    area = 4;
-                    distantArea = 4;
+                    // 2 is the current default (Aug 2021)
+                    area = 2 + viewDistanceIncrease.Value;
+                    distantArea = 2 + viewDistanceIncrease.Value;
                 }
             }
         }
 
-        //[HarmonyPatch(typeof(ZDO), "SetDistant")]
-        //public static class ZDOSetDistantPatch
-        //{
-        //    public static void Prefix(ref bool distant)
-        //    {
-        //        distant = false;
-        //    }
-        //}
-
         [HarmonyPatch(typeof(GameCamera), "Awake")]
         public static class GameCameraAwakePatch
         {
-            public static void Postfix(Camera ___m_camera, ref float ___m_maxDistance, ref float ___m_maxDistanceBoat)
+            public static void Postfix(ref float ___m_maxDistance, ref float ___m_maxDistanceBoat)
             {
                 if (camera.Value)
                 {
                     ___m_maxDistance = 16;
-                    ___m_maxDistanceBoat = 24;
+                    ___m_maxDistanceBoat = 32;
                 }
             }
         }
@@ -126,7 +124,7 @@ namespace gVTweaks
                 {
                     __instance.m_secPerProduct = smelterSpeed.Value;
                 }
-                
+
                 if (smelterSize.Value != -1)
                 {
                     if (__instance.m_fuelItem is null)
@@ -151,10 +149,11 @@ namespace gVTweaks
             {
                 if (deposits.Value)
                 {
-                    var item = AccessTools.Method(typeof(Smelter), "FindCookableItem").Invoke(__instance, new object[] {user.GetInventory()});
-                    if (item is not null)
+                    var item = AccessTools.Method(typeof(Smelter), "FindCookableItem").Invoke(__instance, new object[] { user.GetInventory() });
+                    if (item is not null
+                        && __instance.GetQueueSize() < __instance.m_maxOre)
                     {
-                        AccessTools.Method(typeof(Smelter), "OnAddOre").Invoke(__instance, new[] {sw, user, item});
+                        AccessTools.Method(typeof(Smelter), "OnAddOre").Invoke(__instance, new[] { sw, user, item });
                     }
                 }
             }
@@ -167,9 +166,10 @@ namespace gVTweaks
             {
                 if (deposits.Value)
                 {
-                    if (user.GetInventory().HaveItem(___m_fuelItem.m_itemData.m_shared.m_name))
+                    if (user.GetInventory().HaveItem(___m_fuelItem.m_itemData.m_shared.m_name)
+                        && __instance.GetFuel() < __instance.m_maxFuel)
                     {
-                        AccessTools.Method(typeof(Smelter), "OnAddFuel").Invoke(__instance, new object[] {sw, user, null});
+                        AccessTools.Method(typeof(Smelter), "OnAddFuel").Invoke(__instance, new object[] { sw, user, null });
                     }
                 }
             }
@@ -180,9 +180,10 @@ namespace gVTweaks
         {
             public static void Prefix(ref float sailSize)
             {
-                if (shipSpeed.Value)
+                if (sailEffectPercent.Value > 100)
                 {
-                    sailSize *= 3;
+                    // ReSharper disable once PossibleLossOfFraction
+                    sailSize *= sailEffectPercent.Value / 100;
                 }
             }
         }
@@ -190,16 +191,73 @@ namespace gVTweaks
         [HarmonyPatch(typeof(Ship), "Awake")]
         public static class ShipAwakePatch
         {
-            public static void Postfix(ref float ___m_backwardForce)
+            public static void Postfix(Ship __instance, ref float ___m_backwardForce)
             {
-                if (shipSpeed.Value)
+                if (shipMassPercent.Value > 100)
                 {
-                    ___m_backwardForce = 0.6f;
+                    // ReSharper disable once PossibleLossOfFraction
+                    __instance.GetComponentInChildren<Rigidbody>().mass /= shipMassPercent.Value / 100;
+                }
+
+                if (oarSpeedPercent.Value > 100)
+                {
+                    // ReSharper disable once PossibleLossOfFraction
+                    ___m_backwardForce *= oarSpeedPercent.Value / 100;
                 }
             }
         }
 
-        // thanks to Valheim Plus
+        [HarmonyPatch(typeof(CameraEffects), "SetAntiAliasing")]
+        public static class CameraEffectsSetAntiAliasingPatch
+        {
+            public static void Prefix(PostProcessingBehaviour ___m_postProcessing)
+            {
+                if (taa.Value)
+                {
+                    var antialiasingSettings = ___m_postProcessing.profile.antialiasing.settings;
+                    antialiasingSettings.method = AntialiasingModel.Method.Taa;
+                    ___m_postProcessing.profile.antialiasing.settings = antialiasingSettings;
+                }
+            }
+        }
+
+        //[HarmonyPatch(typeof(GeometryUtility), "CalculateFrustumPlanes", typeof(Matrix4x4), typeof(Plane[]))]
+        //public static class adfasdfd
+        //{
+        //    public static void Prefix(ref Plane[] planes)
+        //    {
+        //        foreach (var p in planes)
+        //        {
+        //            
+        //        }
+        //    }
+        //}
+
+        //[HarmonyPatch(typeof(Utils), "InsideMainCamera", typeof(BoundingSphere))]
+        //public static class UtilsInsideMainCameraPatch
+        //{
+        //    public static void Prefix(ref BoundingSphere bounds)
+        //    {
+        //        if (boundFactor.Value != -1)
+        //        {
+        //            bounds.radius *= boundFactor.Value;
+        //        }
+        //    }
+        //}
+        //
+        //[HarmonyPatch(typeof(Utils), "InsideMainCamera", typeof(Bounds))]
+        //public static class UtilsInsideMainCameraPatch2
+        //{
+        //    public static void Prefix(ref Bounds bounds)
+        //    {
+        //        if (boundFactor.Value != -1)
+        //        {
+        //            bounds.size *= boundFactor.Value;
+        //        }
+        //    }
+        //}
+
+        //thanks to Valheim Plus
         //[HarmonyPatch(typeof(Bed), "Interact")]
         //public static class BedInteractPatch
         //{
@@ -260,6 +318,5 @@ namespace gVTweaks
         //        return true;
         //    }
         //}
-        //
     }
 }
